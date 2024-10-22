@@ -6,7 +6,8 @@ const documentSchema = new Schema(
         filePath: { type: String, required: true },
         fileSize: { type: String, required: true },
         pageCount: { type: Number },
-        error: { hasError: { type: Boolean, default: false },
+        error: { 
+            hasError: { type: Boolean, default: false },
             message: { type: String }
         },
         summary: {

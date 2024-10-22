@@ -25,16 +25,37 @@ app.get("/results", async (req, res) => {
         const files = await fs.promises.readdir(folderPath);
         const pdfFiles = files.filter(file => path.extname(file).toLowerCase() === ".pdf");
         console.log("PDF files count:", pdfFiles.length);
-
-        const summaries = [];
-        for (const pdf of pdfFiles) {
+        const docsArray = [];
+        const docuPromises = pdfFiles.map(pdf => {
             const pdfPath = path.join(folderPath, pdf);
-            console.log("path", pdfPath);
-            const summary = await generateDynamicSummary(pdfPath);
-            summaries.push({ summary });
+            return fs.promises.stat(pdfPath)
+            .then(({ size }) => docsArray.push({
+                        fileName: pdf,
+                        filePath: pdfPath,
+                        fileSize: size
+                    })
+            )
+            .catch(err => err);                
+        });
+        await Promise.all(docuPromises);
+        const documents = await Document.insertMany(docsArray);
+        // console.log(documents, "docss");
+
+        const queries = [];
+        for (const doc of documents) {
+            const { pageCount, summary } = await generateDynamicSummary(doc.filePath);
+            queries.push({
+                updateOne: {
+                    filter: { _id: doc._id },
+                    update: {
+                        summary: { content: summary },
+                        pageCount
+                    }
+                }
+            });
         }
-        res.json({ summaries });
-        // res.send(summary);
+        const status = await Document.bulkWrite(queries);
+        res.json({ status });
     } catch (error) {
         console.error("Error processing results:", error);
         // res.json({ error: error.message });
@@ -43,7 +64,7 @@ app.get("/results", async (req, res) => {
 
 const processPdf = async (filePath) => {
     try {
-        const dataBuffer = fs.readFileSync(filePath);
+        const dataBuffer = await fs.promises.readFile(filePath);
         const { numpages, text } = await pdfParser(dataBuffer);
         return { numpages, text };
     } catch (err) {        
@@ -60,23 +81,23 @@ const generateDynamicSummary = async (pdfPath) => {
         if (pageCount <= 5) {
             summarySentenceCount = 8;
         } else if (pageCount <= 10) {
-            summarySentenceCount = 15; // Short summary
+            summarySentenceCount = 15; 
         } else if (pageCount <= 30) {
-            summarySentenceCount = 70; // Medium summary
+            summarySentenceCount = 70; 
         } else if (pageCount <= 100) {
-            summarySentenceCount = 200; // Detailed summary
+            summarySentenceCount = 200; 
         } else {
-            summarySentenceCount = 400; // Very detailed summary
+            summarySentenceCount = 400; 
         }
 
         const Summarizer = new SummarizerManager(text, summarySentenceCount);
         const summary = await Summarizer.getSummaryByFrequency().summary;
 
         console.log(`Generated summary for ${pdfPath}:`);
-        return summary;
+        return { pageCount, summary };
     } catch (error) {
         console.error("Error generating summary:", error);
-        throw error; // Rethrow to handle it upstream
+        throw error;
     }
 };
 
