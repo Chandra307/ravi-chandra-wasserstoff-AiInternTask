@@ -5,7 +5,6 @@ const fs = require("fs");
 const path = require("path");
 const mongoose = require("mongoose");
 const Document = require("./models/document");
-// const PDFParser = require('pdf2json');
 const pdfParser = require("pdf-parse");
 const { SummarizerManager } = require('node-summarizer');
 
@@ -19,8 +18,10 @@ app.get("/", async (req, res) => {
     }
 });
 
+
 app.get("/results", async (req, res) => {
     try {
+        // const folderPath = "E:\\IDs";
         const folderPath = path.join(__dirname, "pdfs");
         const files = await fs.promises.readdir(folderPath);
         const pdfFiles = files.filter(file => path.extname(file).toLowerCase() === ".pdf");
@@ -41,22 +42,35 @@ app.get("/results", async (req, res) => {
         const documents = await Document.insertMany(docsArray);
         // console.log(documents, "docss");
 
-        const queries = [];
-        for (const doc of documents) {
-            const { pageCount, summary } = await generateDynamicSummary(doc.filePath);
-            queries.push({
-                updateOne: {
-                    filter: { _id: doc._id },
-                    update: {
-                        summary: { content: summary },
-                        pageCount
+        const updatePromises = documents.map(async (doc) => {
+            try {
+                const { pageCount, summary } = await generateDynamicSummary(doc.filePath);
+                return {
+                    updateOne: {
+                        filter: { _id: doc._id },
+                        update: {
+                            summary: { content: JSON.stringify(summary) },
+                            pageCount
+                        }
+                    }
+                };
+                
+            } catch (err) {
+                console.error(err, "aadhaar pwd");
+                return {
+                    updateOne: { 
+                        filter: { _id: doc._id },
+                        update: { error: { hasError: true, message: "Encryptd file..." + err.message } }
                     }
                 }
-            });
-        }
+            }
+        });
+        const queries = (await Promise.all(updatePromises)).filter(query => query);
+        console.log(queries, 'qqq');
         const status = await Document.bulkWrite(queries);
         res.json({ status });
-    } catch (error) {
+    }
+    catch (error) {
         console.error("Error processing results:", error);
         // res.json({ error: error.message });
     }
@@ -68,7 +82,8 @@ const processPdf = async (filePath) => {
         const { numpages, text } = await pdfParser(dataBuffer);
         return { numpages, text };
     } catch (err) {        
-        console.error(err);
+        // console.error(err, 'no passwd given');
+        throw err;
     }       
 };
 
@@ -95,9 +110,10 @@ const generateDynamicSummary = async (pdfPath) => {
 
         console.log(`Generated summary for ${pdfPath}:`);
         return { pageCount, summary };
-    } catch (error) {
-        console.error("Error generating summary:", error);
-        throw error;
+    }
+    catch (err) {
+        // console.error("Error generating summary:", err);
+        throw err;
     }
 };
 
