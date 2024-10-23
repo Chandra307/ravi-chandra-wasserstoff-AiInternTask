@@ -2,10 +2,7 @@ const Document = require("../models/document");
 
 const fs = require("fs");
 const path = require("path");
-
-const pdfParser = require("pdf-parse");
-const { SummarizerManager } = require('node-summarizer');
-const rake = require("rake-js");
+const { Worker } = require("worker_threads");
 
 module.exports = async (req, res, next) => {
     try {
@@ -30,11 +27,12 @@ module.exports = async (req, res, next) => {
         });
         await Promise.all(docuPromises);
         const documents = await Document.insertMany(docsArray);
-        // console.log(documents, "docss");
+        console.log("Stored metadata in db");
 
         const updatePromises = documents.map(async (doc) => {
             try {
-                const { pageCount, summary, keywords } = await generateDynamicSummary(doc.filePath);
+                const dataBuffer = await fs.promises.readFile(doc.filePath);
+                const { pageCount, summary, keywords } = await createWorker(dataBuffer);
                 return {
                     updateOne: {
                         filter: { _id: doc._id },
@@ -48,12 +46,11 @@ module.exports = async (req, res, next) => {
                 
             } catch (err) {
                 console.error(err);
-                if (err.message === "No password given") {
-                    return {
-                        updateOne: { 
-                            filter: { _id: doc._id },
-                            update: { error: { hasError: true, message: "Encrypted file..." + err.message } }
-                        }
+                let message = err.message === "No password given" ? "Encrypted file..." + err.message : "Corrupted file!";
+                return {
+                    updateOne: { 
+                        filter: { _id: doc._id },
+                        update: { error: { hasError: true, message } }
                     }
                 }
             }
@@ -62,61 +59,27 @@ module.exports = async (req, res, next) => {
         const status = await Document.bulkWrite(queries);
         res.status(200).json({ status });
     }
-    catch (error) {
-        console.error("Error processing results:", error);
-        res.status(500).json({ error: error.message });
-    }
-};
-
-const processPdf = async (filePath) => {
-    try {
-        const dataBuffer = await fs.promises.readFile(filePath);
-        const { numpages, text } = await pdfParser(dataBuffer);
-        return { numpages, text };
-    } catch (err) {        
-        console.error(err);
-        throw err;
-    }       
-};
-console.log(rake.default, "rak");
-
-const cleanText = (text) => {
-    return text.replace(/[^a-zA-Z0-9.,\s]/g, '').replace(/\s+/g, ' ').trim();
-};
-
-const generateDynamicSummary = async (pdfPath) => {
-    try {
-        const { numpages: pageCount, text } = await processPdf(pdfPath);
-
-        const cleanedText = cleanText(text);
-
-
-        let summarySentenceCount;
-        if (pageCount <= 5) {
-            summarySentenceCount = 8;
-        } else if (pageCount <= 10) {
-            summarySentenceCount = 15; 
-        } else if (pageCount <= 30) {
-            summarySentenceCount = 70; 
-        } else if (pageCount <= 100) {
-            summarySentenceCount = 200; 
-        } else {
-            summarySentenceCount = 400; 
-        }
-
-        const Summarizer = new SummarizerManager(cleanedText, summarySentenceCount);
-        const summary = await Summarizer.getSummaryByFrequency().summary;
-
-        const keywords = extractKeywords(cleanedText);
-        keywords.length = Math.min(keywords.length, 6);
-
-        console.log(`Generated summary for ${pdfPath}:`);
-        return { pageCount, summary, keywords };
-    }
     catch (err) {
-        console.error("Error generating summary:", err);
-        throw err;
+        console.error("Error processing results:", err);
+        res.status(500).json({ error: err.message });
     }
 };
 
-const extractKeywords = (textContent) => rake.default(textContent);
+function createWorker(dataBuffer) {
+    return new Promise((res, rej) => {
+
+            const worker = new Worker(
+                path.join(__dirname, "worker_thread.js"),
+                { workerData: { dataBuffer } }
+            );
+
+            worker.on("message", (info) => {
+                if (info.error) rej(info.error);
+                res(info);
+            });
+            worker.on("error", (err) => {
+                console.log(err);
+                rej(err);
+            });
+    })
+}

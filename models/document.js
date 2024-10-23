@@ -6,14 +6,11 @@ const documentSchema = new Schema(
         filePath: { type: String, required: true },
         fileSize: { type: String, required: true },
         pageCount: { type: Number },
-        error: { 
+        error: {
             hasError: { type: Boolean, default: false },
             message: { type: String }
         },
-        summary: {
-            length: { type: String, enum: ["short", "medium", "long"] },
-            content: { type: String }
-        },
+        summary: { content: { type: String } },
         keywords: { list: [{ type: String }] }
     }
 );
