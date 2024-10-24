@@ -18,6 +18,7 @@
     "node-summarizer": "^1.0.7",
     "p-limit": "^6.1.0",
     "pdf-parse": "^1.1.1",
+    "pdfjs-dist": "^3.9.179",
     "rake-js": "^0.1.1"
   }
 }

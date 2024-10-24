@@ -3,9 +3,12 @@ const Document = require("../models/document");
 const fs = require("fs");
 const path = require("path");
 const { Worker } = require("worker_threads");
+const maxWorkers = 4;
+let activeWorkers = 0;
 
 module.exports = async (req, res, next) => {
-    try {
+    try {        
+
         const folderPath = path.join(process.cwd(), "pdfs");
         const files = await fs.promises.readdir(folderPath);
         const pdfFiles = files.filter(file => path.extname(file).toLowerCase() === ".pdf");
@@ -31,7 +34,14 @@ module.exports = async (req, res, next) => {
 
         const updatePromises = documents.map(async (doc) => {
             try {
-                const dataBuffer = await fs.promises.readFile(doc.filePath);
+                const stream = fs.createReadStream(doc.filePath);
+                
+                const chunks = [];
+                const dataBuffer = await new Promise((res, rej) => {
+                    stream.on("data", chunk => chunks.push(chunk));
+                    stream.on("error", err => rej(err));
+                    stream.on("end", () => res(Buffer.concat(chunks)));                    
+                })
                 const { pageCount, summary, keywords } = await createWorker(dataBuffer);
                 return {
                     updateOne: {
@@ -57,6 +67,7 @@ module.exports = async (req, res, next) => {
         });
         const queries = (await Promise.all(updatePromises)).filter(query => query);
         const status = await Document.bulkWrite(queries);
+        console.log("Updated document post processing.");
         res.status(200).json({ status });
     }
     catch (err) {
@@ -68,6 +79,8 @@ module.exports = async (req, res, next) => {
 function createWorker(dataBuffer) {
     return new Promise((res, rej) => {
 
+        if (activeWorkers < maxWorkers) {
+
             const worker = new Worker(
                 path.join(__dirname, "worker_thread.js"),
                 { workerData: { dataBuffer } }
@@ -76,10 +89,13 @@ function createWorker(dataBuffer) {
             worker.on("message", (info) => {
                 if (info.error) rej(info.error);
                 res(info);
+                activeWorkers--;
             });
             worker.on("error", (err) => {
                 console.log(err);
                 rej(err);
+                activeWorkers--;
             });
+        }
     })
 }
