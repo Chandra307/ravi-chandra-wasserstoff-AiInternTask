@@ -2,7 +2,9 @@
 
 - Prerequisites: *Node.js*, and *Git* have to be installed.
 - To start with, clone the GitHub repo and run `npm i` command in the terminal to install all the required dependencies.
-- `process.env.DB_CONNECTION_STRING` has to be replaced with *mongodb url*.
+- `process.env.DB_CONNECTION_STRING` in index.js file has to be replaced with *your mongodb url*.
+- Now run `npm start` command in the terminal to start the server.
+- Open a web browser and go to *localhost:3000* to load the UI and click the "Summarize" button to start processing. 
 
 # Approach:
 

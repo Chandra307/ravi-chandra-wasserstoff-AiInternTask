@@ -6,25 +6,12 @@
     <title>Wasserstoff</title>
 </head>
 <body>
-    <form onsubmit="chooseFolder(event)" enctype="multipart/form-data">
-        <!-- <input type="file" id="folderInput" name="files" webkitdirectory>
-        <button type="submit">Upload Folder</button> -->
-    </form>
+
     <button id="run" style="margin-left: auto;">Summarize</button>
       <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.7.7/axios.min.js"></script>
       <script>
-        console.log('script');
-        async function chooseFolder(e) {
-            try {
-                e.preventDefault();
-                const pdfs = document.getElementById("folderInput").files;
-                console.log(pdfs);
-                await axios.post("/transform", pdfs);
-            } catch (error) {
-                console.log(error);
-            }
 
-        }
+        // Event handler for button click, that sends a request to start processing files
         document.getElementById("run").onclick = async () => {
             try {
                 await axios.get("/results");

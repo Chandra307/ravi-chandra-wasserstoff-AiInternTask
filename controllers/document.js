@@ -9,40 +9,43 @@ let activeWorkers = 0;
 module.exports = async (req, res, next) => {
     try {        
 
-        const folderPath = path.join(process.cwd(), "pdfs");
+        const folderPath = path.join(process.cwd(), "pdfs"); // storing the path of the folder containing PDFs
         const files = await fs.promises.readdir(folderPath);
         const pdfFiles = files.filter(file => path.extname(file).toLowerCase() === ".pdf");
         console.log("PDF files count:", pdfFiles.length);
-        const docsArray = [];
-        const docuPromises = pdfFiles.map(pdf => {
-            const pdfPath = path.join(folderPath, pdf);
-            return fs.promises.stat(pdfPath)
-            .then(({ size }) => docsArray.push({
-                        fileName: pdf,
-                        filePath: pdfPath,
-                        fileSize: size
-                    })
-            )
-            .catch((err) => {
-                console.error(err);
-                return err;
-            });                
+        
+        // Reading file stats asynchronously and creating an array of promises that resolve with files' metadata
+        const docuPromises = pdfFiles.map(async pdf => {
+            try {
+                const pdfPath = path.join(folderPath, pdf);
+                const { size } = await fs.promises.stat(pdfPath);
+                return {
+                    fileName: pdf,
+                    filePath: pdfPath,
+                    fileSize: size
+                };
+            }
+            catch (error) {                
+                    console.error(err);   
+            }
         });
-        await Promise.all(docuPromises);
-        const documents = await Document.insertMany(docsArray);
+        const insertQueries = await Promise.all(docuPromises);
+        const documents = await Document.insertMany(insertQueries); // creating MongoDB documents in bulk
         console.log("Stored metadata in db");
 
+        
         const updatePromises = documents.map(async (doc) => {
             try {
-                const stream = fs.createReadStream(doc.filePath);
-                
-                const chunks = [];
                 const dataBuffer = await new Promise((res, rej) => {
-                    stream.on("data", chunk => chunks.push(chunk));
-                    stream.on("error", err => rej(err));
-                    stream.on("end", () => res(Buffer.concat(chunks)));                    
-                })
+                    const stream = fs.createReadStream(doc.filePath);
+                    const chunks = [];
+                    stream.on("data", chunk => chunks.push(chunk)); // appending each chunk read, into chunks array
+                    stream.on("error", err => rej(err)); // to update the mongodb document that there is a problem reading the file
+                    stream.on("end", () => res(Buffer.concat(chunks))); // clubs all buffer data                
+                });
+
                 const { pageCount, summary, keywords } = await createWorker(dataBuffer);
+
                 return {
                     updateOne: {
                         filter: { _id: doc._id },
@@ -65,8 +68,8 @@ module.exports = async (req, res, next) => {
                 }
             }
         });
-        const queries = (await Promise.all(updatePromises)).filter(query => query);
-        const status = await Document.bulkWrite(queries);
+        const updateQueries = await Promise.all(updatePromises);
+        const status = await Document.bulkWrite(updateQueries); // updating mongodb documents in bulk 
         console.log("Updated document post processing.");
         res.status(200).json({ status });
     }
@@ -76,25 +79,29 @@ module.exports = async (req, res, next) => {
     }
 };
 
+// creates a new worker to perform tasks in worker_thread.js (pdf-parsing, summarizing, keyword extraction)
 function createWorker(dataBuffer) {
     return new Promise((res, rej) => {
 
-        if (activeWorkers < maxWorkers) {
+        if (activeWorkers < maxWorkers) { // creating workers only when their count is below threshold 
 
             const worker = new Worker(
                 path.join(__dirname, "worker_thread.js"),
                 { workerData: { dataBuffer } }
             );
 
+            // data received from worker thread
             worker.on("message", (info) => {
                 if (info.error) rej(info.error);
                 res(info);
-                activeWorkers--;
+                activeWorkers--; // decreasing the active worker thread count because the worker is no longer active
             });
+
+            // to handle any errors forwarded by the worker thread
             worker.on("error", (err) => {
                 console.log(err);
                 rej(err);
-                activeWorkers--;
+                activeWorkers--; 
             });
         }
     })
