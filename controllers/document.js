@@ -70,7 +70,7 @@ module.exports = async (req, res, next) => {
         });
         const updateQueries = await Promise.all(updatePromises);
         const status = await Document.bulkWrite(updateQueries); // updating mongodb documents in bulk 
-        console.log("Updated document post processing.");
+        console.log("Updated documents post processing.");
         res.status(200).json({ status });
     }
     catch (err) {
