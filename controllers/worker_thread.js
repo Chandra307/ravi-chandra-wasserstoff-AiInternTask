@@ -22,7 +22,6 @@ const cleanText = (text) => {
 const generateDynamicSummary = async (dataBuffer) => {
     try {
         const { numpages: pageCount, text } = await pdfParser(dataBuffer);
-
         const cleanedText = cleanText(text);
 
 

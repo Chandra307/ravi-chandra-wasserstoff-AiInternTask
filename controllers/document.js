@@ -2,9 +2,11 @@ const Document = require("../models/document");
 
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const { Worker } = require("worker_threads");
-const maxWorkers = 4;
+const maxWorkers = 1;
 let activeWorkers = 0;
+const taskQueue = [];
 
 module.exports = async (req, res, next) => {
     try {        
@@ -33,7 +35,6 @@ module.exports = async (req, res, next) => {
         const documents = await Document.insertMany(insertQueries); // creating MongoDB documents in bulk
         console.log("Stored metadata in db");
 
-        
         const updatePromises = documents.map(async (doc) => {
             try {
                 const dataBuffer = await new Promise((res, rej) => {
@@ -68,7 +69,11 @@ module.exports = async (req, res, next) => {
                 }
             }
         });
+
+        console.time("process promises");
         const updateQueries = await Promise.all(updatePromises);
+        console.timeEnd("process promises");
+        
         const status = await Document.bulkWrite(updateQueries); // updating mongodb documents in bulk 
         console.log("Updated documents post processing.");
         res.status(200).json({ status });
@@ -95,14 +100,29 @@ function createWorker(dataBuffer) {
                 if (info.error) rej(info.error);
                 res(info);
                 activeWorkers--; // decreasing the active worker thread count because the worker is no longer active
+                processQueue();
             });
-
+            
             // to handle any errors forwarded by the worker thread
             worker.on("error", (err) => {
                 console.log(err);
                 rej(err);
-                activeWorkers--; 
+                activeWorkers--;
+                processQueue();
             });
+            worker.on("exit", () => {
+                activeWorkers--;
+                processQueue();
+            })
+        } else {
+            taskQueue.push({ dataBuffer, res, rej });
         }
     })
+}
+
+function processQueue() {
+    if (taskQueue.length && activeWorkers < maxWorkers) {
+        const { dataBuffer, res, rej } = taskQueue.shift();
+        createWorker(dataBuffer).then(res).catch(rej);
+    }
 }
